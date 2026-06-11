@@ -1,0 +1,69 @@
+server:
+  port: 8080
+
+jwt:
+  secret: ${JWT_SECRET:change-me-this-is-a-dev-only-secret-key-32bytes!}
+
+spring:
+  application:
+    name: api-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+  cloud:
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins: "http://localhost:8085"
+            allowedMethods: "*"
+            allowedHeaders: "*"
+      default-filters:
+        - name: RequestRateLimiter
+          args:
+            key-resolver: "#{@principalOrIpKeyResolver}"
+            redis-rate-limiter.replenishRate: 50
+            redis-rate-limiter.burstCapacity: 100
+      routes:
+        - id: user-service
+          uri: lb://user-service
+          predicates: [ "Path=/api/auth/**, /api/users/**" ]
+        - id: order-service
+          uri: lb://order-service
+          predicates: [ "Path=/api/orders/**" ]
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: orderCb
+                fallbackUri: forward:/fallback/orders
+        - id: portfolio-service
+          uri: lb://portfolio-service
+          predicates: [ "Path=/api/portfolio/**" ]
+        - id: market-data-service
+          uri: lb://market-data-service
+          predicates: [ "Path=/api/market/**, /ws/**" ]
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      orderCb:
+        slidingWindowSize: 20
+        failureRateThreshold: 50
+        waitDurationInOpenState: 10s
+        permittedNumberOfCallsInHalfOpenState: 5
+  timelimiter:
+    instances:
+      orderCb:
+        timeoutDuration: 3s
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,gateway

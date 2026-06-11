@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vega Markets — Trade in real time</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+<style>
+:root{
+  --ink:#0B1020;          /* deep indigo background */
+  --panel:#121931;        /* card surface */
+  --panel-2:#0F1528;      /* inset surface */
+  --line:#222C4A;         /* hairline borders */
+  --iris:#7C83FF;         /* brand accent */
+  --buy:#2EE6A8;          /* gains / buy */
+  --sell:#FF6B7A;         /* losses / sell */
+  --snow:#E9ECF5;         /* primary text */
+  --mute:#8A93AD;         /* secondary text */
+  --radius:14px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{font-size:15px}
+body{
+  background:var(--ink);
+  color:var(--snow);
+  font-family:'Space Grotesk',system-ui,sans-serif;
+  min-height:100vh;
+}
+.mono{font-family:'IBM Plex Mono',monospace}
+button{font-family:inherit;cursor:pointer;border:none}
+input,select{font-family:'IBM Plex Mono',monospace}
+
+/* ============ TICKER TAPE (signature) ============ */
+.tape{
+  position:sticky;top:0;z-index:50;
+  background:var(--panel-2);
+  border-bottom:1px solid var(--line);
+  overflow:hidden;height:38px;
+  display:flex;align-items:center;
+}
+.tape-track{
+  display:flex;gap:2.5rem;white-space:nowrap;
+  animation:tape 40s linear infinite;
+  padding-left:100%;
+}
+@keyframes tape{to{transform:translateX(-100%)}}
+@media (prefers-reduced-motion: reduce){
+  .tape-track{animation:none;padding-left:1rem;overflow-x:auto}
+}
+.tape-item{font-family:'IBM Plex Mono',monospace;font-size:.8rem;color:var(--mute)}
+.tape-item b{color:var(--snow);font-weight:600;margin-right:.45rem}
+.tape-item .up{color:var(--buy)} .tape-item .dn{color:var(--sell)}
+.tape-item .flash{animation:flash .6s ease}
+@keyframes flash{0%{color:var(--iris)}100%{}}
+
+/* ============ HEADER ============ */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:1rem 2rem;border-bottom:1px solid var(--line);
+}
+.logo{display:flex;align-items:baseline;gap:.5rem}
+.logo .mark{
+  font-weight:700;font-size:1.3rem;letter-spacing:-.02em;
+}
+.logo .mark span{color:var(--iris)}
+.logo .tag{font-size:.72rem;color:var(--mute);letter-spacing:.14em;text-transform:uppercase}
+.session{display:flex;align-items:center;gap:1rem;font-size:.85rem}
+.session .dot{width:7px;height:7px;border-radius:50%;background:var(--buy);display:inline-block;margin-right:.4rem}
+.btn-ghost{
+  background:transparent;color:var(--mute);border:1px solid var(--line);
+  padding:.45rem .9rem;border-radius:8px;font-size:.8rem;transition:.15s;
+}
+.btn-ghost:hover{color:var(--snow);border-color:var(--iris)}
+
+/* ============ AUTH VIEW ============ */
+.auth-wrap{
+  min-height:calc(100vh - 100px);
+  display:grid;place-items:center;padding:2rem;
+}
+.auth-card{
+  width:min(420px,100%);
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);padding:2.2rem;
+}
+.auth-card h1{font-size:1.7rem;font-weight:700;letter-spacing:-.02em;margin-bottom:.4rem}
+.auth-card h1 em{font-style:normal;color:var(--iris)}
+.auth-card p.sub{color:var(--mute);font-size:.88rem;margin-bottom:1.6rem;line-height:1.5}
+.tabs{display:flex;gap:.4rem;margin-bottom:1.4rem;background:var(--panel-2);border-radius:9px;padding:.3rem}
+.tabs button{
+  flex:1;background:transparent;color:var(--mute);
+  padding:.5rem;border-radius:7px;font-size:.85rem;font-weight:500;transition:.15s;
+}
+.tabs button.active{background:var(--iris);color:#0B1020;font-weight:600}
+.field{margin-bottom:1rem}
+.field label{display:block;font-size:.75rem;color:var(--mute);margin-bottom:.4rem;letter-spacing:.04em;text-transform:uppercase}
+.field input,.field select{
+  width:100%;background:var(--panel-2);border:1px solid var(--line);
+  color:var(--snow);padding:.7rem .85rem;border-radius:9px;font-size:.9rem;outline:none;transition:.15s;
+}
+.field input:focus,.field select:focus{border-color:var(--iris)}
+.btn-primary{
+  width:100%;background:var(--iris);color:#0B1020;
+  padding:.8rem;border-radius:9px;font-size:.95rem;font-weight:600;transition:.15s;margin-top:.4rem;
+}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-primary:disabled{opacity:.5;cursor:wait}
+
+/* ============ APP LAYOUT ============ */
+.app{display:none;padding:1.4rem 2rem;gap:1.2rem;
+  grid-template-columns:300px 1fr 320px;align-items:start;max-width:1500px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:1.3rem}
+.card h2{font-size:.78rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin-bottom:1rem}
+.stack{display:flex;flex-direction:column;gap:1.2rem}
+
+/* ---- order ticket ---- */
+.side-toggle{display:flex;gap:.4rem;margin-bottom:1rem}
+.side-toggle button{
+  flex:1;padding:.6rem;border-radius:9px;font-weight:600;font-size:.9rem;
+  background:var(--panel-2);color:var(--mute);border:1px solid var(--line);transition:.15s;
+}
+.side-toggle button.buy.active{background:rgba(46,230,168,.14);color:var(--buy);border-color:var(--buy)}
+.side-toggle button.sell.active{background:rgba(255,107,122,.13);color:var(--sell);border-color:var(--sell)}
+.type-row{display:flex;gap:.4rem;margin-bottom:1rem}
+.type-row button{
+  flex:1;padding:.45rem;border-radius:7px;font-size:.78rem;
+  background:var(--panel-2);color:var(--mute);border:1px solid var(--line);
+}
+.type-row button.active{color:var(--iris);border-color:var(--iris)}
+.submit-buy{background:var(--buy)!important;color:#06281C!important}
+.submit-sell{background:var(--sell)!important;color:#2B0A10!important}
+.est{font-size:.78rem;color:var(--mute);text-align:center;margin-top:.7rem}
+
+/* ---- portfolio ---- */
+.cash-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1.1rem}
+.cash-row .label{font-size:.78rem;color:var(--mute)}
+.cash-row .value{font-size:1.6rem;font-weight:600;letter-spacing:-.01em}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{font-size:.7rem;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;
+  text-align:left;padding:.45rem .5rem;border-bottom:1px solid var(--line);font-weight:500}
+td{padding:.55rem .5rem;border-bottom:1px solid rgba(34,44,74,.5)}
+td.num,th.num{text-align:right}
+tr:last-child td{border-bottom:none}
+.pill{
+  display:inline-block;padding:.15rem .5rem;border-radius:5px;
+  font-size:.68rem;font-weight:600;letter-spacing:.05em;
+}
+.pill.BUY{background:rgba(46,230,168,.14);color:var(--buy)}
+.pill.SELL{background:rgba(255,107,122,.13);color:var(--sell)}
+.pill.FILLED{background:rgba(124,131,255,.15);color:var(--iris)}
+.pill.ACCEPTED,.pill.NEW{background:rgba(138,147,173,.15);color:var(--mute)}
+.pill.PARTIALLY_FILLED{background:rgba(255,194,102,.15);color:#FFC266}
+.pill.CANCELLED,.pill.REJECTED{background:rgba(255,107,122,.1);color:var(--sell)}
+.cancel-x{
+  background:transparent;color:var(--mute);font-size:.75rem;
+  border:1px solid var(--line);border-radius:5px;padding:.15rem .5rem;transition:.15s;
+}
+.cancel-x:hover{color:var(--sell);border-color:var(--sell)}
+.empty{color:var(--mute);font-size:.82rem;text-align:center;padding:1.2rem 0}
+
+/* ---- live feed ---- */
+.feed{max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:.45rem}
+.feed::-webkit-scrollbar{width:4px}
+.feed::-webkit-scrollbar-thumb{background:var(--line);border-radius:2px}
+.fill-row{
+  display:flex;justify-content:space-between;align-items:center;
+  background:var(--panel-2);border-radius:8px;padding:.55rem .7rem;
+  font-size:.8rem;animation:slidein .25s ease;
+}
+@keyframes slidein{from{opacity:0;transform:translateY(-6px)}to{opacity:1}}
+@media (prefers-reduced-motion: reduce){.fill-row{animation:none}}
+.fill-row .sym{font-weight:600}
+.fill-row .px.up{color:var(--buy)} .fill-row .px.dn{color:var(--sell)}
+.fill-row .time{color:var(--mute);font-size:.68rem}
+
+/* ---- toast ---- */
+#toast{
+  position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--panel);border:1px solid var(--iris);color:var(--snow);
+  padding:.7rem 1.2rem;border-radius:10px;font-size:.85rem;
+  opacity:0;pointer-events:none;transition:.25s;z-index:99;
+}
+#toast.show{opacity:1;transform:translateX(-50%)}
+#toast.err{border-color:var(--sell)}
+
+@media(max-width:1100px){.app{grid-template-columns:1fr 1fr}.col-feed{grid-column:1/-1}}
+@media(max-width:720px){.app{grid-template-columns:1fr;padding:1rem}header{padding:1rem}}
+</style>
+</head>
+<body>
+
+<!-- signature: live ticker tape -->
+<div class="tape"><div class="tape-track" id="tape">
+  <span class="tape-item mono"><b>VEGA</b>connecting to exchange…</span>
+</div></div>
+
+<header>
+  <div class="logo">
+    <div class="mark">vega<span>.</span>markets</div>
+    <div class="tag">live exchange</div>
+  </div>
+  <div class="session" id="session" style="display:none">
+    <span class="mono" style="color:var(--mute)"><span class="dot"></span><span id="who"></span></span>
+    <button class="btn-ghost" onclick="logout()">Sign out</button>
+  </div>
+</header>
+
+<!-- ============ AUTH ============ -->
+<div class="auth-wrap" id="authView">
+  <div class="auth-card">
+    <h1>Markets move fast.<br>So does <em>Vega</em>.</h1>
+    <p class="sub">Place an order and watch it match, settle, and hit your portfolio in milliseconds — powered by a real distributed matching engine.</p>
+    <div class="tabs">
+      <button id="tabLogin" class="active" onclick="setTab('login')">Sign in</button>
+      <button id="tabReg" onclick="setTab('register')">Create account</button>
+    </div>
+    <div class="field"><label>Username</label><input id="username" placeholder="alice" autocomplete="username"></div>
+    <div class="field" id="emailField" style="display:none"><label>Email</label><input id="email" placeholder="alice@vega.markets" type="email"></div>
+    <div class="field"><label>Password</label><input id="password" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+    <button class="btn-primary" id="authBtn" onclick="submitAuth()">Sign in</button>
+    <p class="sub" style="margin:.9rem 0 0;font-size:.75rem">New accounts start with a $100,000 demo balance after their first trade settles.</p>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div class="app" id="appView">
+
+  <!-- order ticket -->
+  <div class="stack">
+    <div class="card">
+      <h2>Order ticket</h2>
+      <div class="side-toggle">
+        <button class="buy active" id="btnBuy" onclick="setSide('BUY')">Buy</button>
+        <button class="sell" id="btnSell" onclick="setSide('SELL')">Sell</button>
+      </div>
+      <div class="type-row">
+        <button class="active" id="btnLimit" onclick="setType('LIMIT')">Limit</button>
+        <button id="btnMarket" onclick="setType('MARKET')">Market</button>
+      </div>
+      <div class="field"><label>Symbol</label>
+        <select id="symbol">
+          <option>AAPL</option><option>GOOG</option><option>TSLA</option>
+          <option>MSFT</option><option>AMZN</option><option>INFY</option>
+        </select>
+      </div>
+      <div class="field" id="priceField"><label>Limit price</label><input id="price" type="number" step="0.01" min="0.01" placeholder="101.00"></div>
+      <div class="field"><label>Quantity</label><input id="qty" type="number" step="1" min="1" placeholder="10"></div>
+      <button class="btn-primary submit-buy" id="submitBtn" onclick="placeOrder()">Buy AAPL</button>
+      <div class="est" id="est"></div>
+    </div>
+  </div>
+
+  <!-- portfolio + orders -->
+  <div class="stack">
+    <div class="card">
+      <h2>Portfolio</h2>
+      <div class="cash-row">
+        <span class="label">Cash available</span>
+        <span class="value mono" id="cash">—</span>
+      </div>
+      <table>
+        <thead><tr><th>Position</th><th class="num">Qty</th><th class="num">Last</th><th class="num">Value</th></tr></thead>
+        <tbody id="positions"><tr><td colspan="4" class="empty">No positions yet — place your first order.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Open & recent orders</h2>
+      <table>
+        <thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th><th>Status</th><th></th></tr></thead>
+        <tbody id="orders"><tr><td colspan="6" class="empty">No orders yet.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- live activity -->
+  <div class="stack col-feed">
+    <div class="card">
+      <h2>Live tape — all symbols</h2>
+      <div class="feed mono" id="feed">
+        <div class="empty">Waiting for the first trade…</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>My fills</h2>
+      <table>
+        <thead><tr><th>Symbol</th><th>Side</th><th class="num">Qty</th><th class="num">Price</th></tr></thead>
+        <tbody id="txns"><tr><td colspan="4" class="empty">Fills appear here after settlement.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const API = 'http://localhost:8080';
+const SYMBOLS = ['AAPL','GOOG','TSLA','MSFT','AMZN','INFY'];
+let token = localStorage.getItem('vega_token');
+let username = localStorage.getItem('vega_user');
+let mode = 'login', side = 'BUY', type = 'LIMIT';
+let lastPrice = {};   // symbol -> last traded price
+let prevPrice = {};
+
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const fmt = n => Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+function toast(msg, err=false){
+  const t=$('toast'); t.textContent=msg; t.className=err?'show err':'show';
+  setTimeout(()=>t.className='',2600);
+}
+async function api(path, opts={}){
+  const headers = {'Content-Type':'application/json', ...(opts.headers||{})};
+  if(token) headers['Authorization'] = 'Bearer '+token;
+  const res = await fetch(API+path,{...opts,headers});
+  if(res.status===401){ logout(); throw new Error('Session expired — sign in again.'); }
+  if(!res.ok){
+    let msg='Request failed ('+res.status+')';
+    try{ const j=await res.json(); msg=j.message||j.error||msg; }catch(e){}
+    throw new Error(msg);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+/* ---------- auth ---------- */
+function setTab(m){
+  mode=m;
+  $('tabLogin').classList.toggle('active',m==='login');
+  $('tabReg').classList.toggle('active',m==='register');
+  $('emailField').style.display = m==='register'?'block':'none';
+  $('authBtn').textContent = m==='login'?'Sign in':'Create account';
+}
+async function submitAuth(){
+  const btn=$('authBtn'); btn.disabled=true;
+  try{
+    const body = mode==='login'
+      ? {username:$('username').value.trim(), password:$('password').value}
+      : {username:$('username').value.trim(), email:$('email').value.trim(), password:$('password').value};
+    const res = await api('/api/auth/'+mode,{method:'POST',body:JSON.stringify(body)});
+    token=res.token; username=res.username;
+    localStorage.setItem('vega_token',token); localStorage.setItem('vega_user',username);
+    enterApp();
+  }catch(e){ toast(e.message,true); }
+  btn.disabled=false;
+}
+function logout(){
+  token=null; localStorage.removeItem('vega_token'); localStorage.removeItem('vega_user');
+  $('appView').style.display='none'; $('authView').style.display='grid'; $('session').style.display='none';
+}
+function enterApp(){
+  $('authView').style.display='none';
+  $('appView').style.display='grid';
+  $('session').style.display='flex';
+  $('who').textContent=username;
+  refreshAll();
+}
+
+/* ---------- order ticket ---------- */
+function setSide(s){
+  side=s;
+  $('btnBuy').classList.toggle('active',s==='BUY');
+  $('btnSell').classList.toggle('active',s==='SELL');
+  updateSubmit();
+}
+function setType(t){
+  type=t;
+  $('btnLimit').classList.toggle('active',t==='LIMIT');
+  $('btnMarket').classList.toggle('active',t==='MARKET');
+  $('priceField').style.display = t==='LIMIT'?'block':'none';
+  updateSubmit();
+}
+function updateSubmit(){
+  const b=$('submitBtn');
+  b.textContent=(side==='BUY'?'Buy ':'Sell ')+$('symbol').value;
+  b.className='btn-primary '+(side==='BUY'?'submit-buy':'submit-sell');
+  const q=+$('qty').value, p=+$('price').value;
+  $('est').textContent = (type==='LIMIT'&&q&&p) ? 'Order value ≈ $'+fmt(q*p) : '';
+}
+['symbol','qty','price'].forEach(id=>$(id).addEventListener('input',updateSubmit));
+$('symbol').addEventListener('change',updateSubmit);
+
+async function placeOrder(){
+  const body={symbol:$('symbol').value, side, type, quantity:+$('qty').value};
+  if(type==='LIMIT') body.price=+$('price').value;
+  if(!body.quantity||body.quantity<1) return toast('Enter a quantity.',true);
+  if(type==='LIMIT'&&(!body.price||body.price<=0)) return toast('Enter a limit price.',true);
+  try{
+    await api('/api/orders',{method:'POST',body:JSON.stringify(body),
+      headers:{'Idempotency-Key':crypto.randomUUID()}});
+    toast(side+' order sent — matching now');
+    $('qty').value=''; updateSubmit();
+    setTimeout(refreshAll,600); setTimeout(refreshAll,2000);
+  }catch(e){ toast(e.message,true); }
+}
+async function cancelOrder(id){
+  try{
+    await api('/api/orders/'+id,{method:'DELETE'});
+    toast('Cancel requested');
+    setTimeout(refreshAll,800);
+  }catch(e){ toast(e.message,true); }
+}
+
+/* ---------- data refresh ---------- */
+async function refreshAll(){
+  if(!token) return;
+  try{
+    const [pf,orders,txns]=await Promise.all([
+      api('/api/portfolio'), api('/api/orders?size=8'), api('/api/portfolio/transactions?size=8')
+    ]);
+    renderPortfolio(pf); renderOrders(orders); renderTxns(txns);
+  }catch(e){ /* transient */ }
+}
+function renderPortfolio(pf){
+  $('cash').textContent='$'+fmt(pf.cashBalance);
+  const tb=$('positions');
+  if(!pf.positions.length){tb.innerHTML='<tr><td colspan="4" class="empty">No positions yet — place your first order.</td></tr>';return;}
+  tb.innerHTML=pf.positions.map(p=>{
+    const last=lastPrice[p.symbol];
+    return `<tr>
+      <td><b>${p.symbol}</b></td>
+      <td class="num mono">${p.quantity}</td>
+      <td class="num mono">${last?'$'+fmt(last):'—'}</td>
+      <td class="num mono">${last?'$'+fmt(last*p.quantity):'—'}</td></tr>`;
+  }).join('');
+}
+function renderOrders(list){
+  const tb=$('orders');
+  if(!list.length){tb.innerHTML='<tr><td colspan="6" class="empty">No orders yet.</td></tr>';return;}
+  tb.innerHTML=list.map(o=>{
+    const open=['NEW','ACCEPTED','PARTIALLY_FILLED'].includes(o.status);
+    return `<tr>
+      <td><b>${o.symbol}</b></td>
+      <td><span class="pill ${o.side}">${o.side}</span></td>
+      <td class="num mono">${o.filledQuantity}/${o.quantity}</td>
+      <td class="num mono">${o.price?'$'+fmt(o.price):'MKT'}</td>
+      <td><span class="pill ${o.status}">${o.status.replace('_',' ')}</span></td>
+      <td>${open?`<button class="cancel-x" onclick="cancelOrder('${o.orderId}')">✕</button>`:''}</td></tr>`;
+  }).join('');
+}
+function renderTxns(list){
+  const tb=$('txns');
+  if(!list.length){tb.innerHTML='<tr><td colspan="4" class="empty">Fills appear here after settlement.</td></tr>';return;}
+  tb.innerHTML=list.map(t=>`<tr>
+    <td><b>${t.symbol}</b></td>
+    <td><span class="pill ${t.side}">${t.side}</span></td>
+    <td class="num mono">${t.quantity}</td>
+    <td class="num mono">$${fmt(t.price)}</td></tr>`).join('');
+}
+
+/* ---------- websocket: tape + feed ---------- */
+function renderTape(){
+  const items=SYMBOLS.map(s=>{
+    const p=lastPrice[s], prev=prevPrice[s];
+    const cls=(p&&prev)?(p>=prev?'up':'dn'):'';
+    return `<span class="tape-item"><b>${s}</b><span class="${cls}">${p?'$'+fmt(p):'—'}</span></span>`;
+  });
+  $('tape').innerHTML=items.concat(items).join(''); // doubled for seamless loop
+}
+function connectWS(){
+  const sock=new SockJS('/ws');
+  const stomp=Stomp.over(sock); stomp.debug=null;
+  stomp.connect({},()=>{
+    stomp.subscribe('/topic/ticker.all',msg=>{
+      const t=JSON.parse(msg.body);
+      prevPrice[t.symbol]=lastPrice[t.symbol];
+      lastPrice[t.symbol]=parseFloat(t.lastPrice);
+      renderTape();
+    });
+    SYMBOLS.forEach(s=>{
+      stomp.subscribe('/topic/trades.'+s,msg=>{
+        const t=JSON.parse(msg.body);
+        addFill(t);
+        refreshAll(); // a trade may involve me — refresh portfolio/orders
+      });
+    });
+  },()=>setTimeout(connectWS,3000)); // reconnect
+}
+function addFill(t){
+  const feed=$('feed');
+  if(feed.querySelector('.empty')) feed.innerHTML='';
+  const prev=prevPrice[t.symbol], px=parseFloat(t.price);
+  const cls=(prev&&px<prev)?'dn':'up';
+  const row=document.createElement('div');
+  row.className='fill-row';
+  row.innerHTML=`<span class="sym">${t.symbol}</span>
+    <span class="px ${cls}">$${fmt(t.price)} × ${t.quantity}</span>
+    <span class="time">${new Date(t.executedAt).toLocaleTimeString()}</span>`;
+  feed.prepend(row);
+  while(feed.children.length>40) feed.lastChild.remove();
+}
+
+/* ---------- boot ---------- */
+renderTape();
+connectWS();
+setInterval(refreshAll,5000);
+if(token){ enterApp(); } else { setTab('login'); }
+updateSubmit();
+</script>
+</body>
+</html>

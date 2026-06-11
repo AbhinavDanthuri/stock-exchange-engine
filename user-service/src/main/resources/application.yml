@@ -1,0 +1,29 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: user-service
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:3306/exchange_users?createDatabaseIfNotExist=true
+    username: ${MYSQL_USER:exchange}
+    password: ${MYSQL_PASSWORD:exchange123}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+jwt:
+  secret: ${JWT_SECRET:change-me-this-is-a-dev-only-secret-key-32bytes!}
+  expiry-minutes: 60
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
