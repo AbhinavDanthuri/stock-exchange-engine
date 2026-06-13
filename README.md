@@ -3,7 +3,7 @@
 A production-style distributed stock exchange backend: six Spring Boot
 microservices, an in-memory lock-free matching engine, Kafka event flows,
 Redis caching/rate-limiting, real-time WebSocket market data, MySQL
-persistence — all on Docker Compose.
+persistence — all on Docker Compose..
 
 ```
 Java 21 · Spring Boot 3.3 · Spring Cloud Gateway · Eureka · Kafka (KRaft)
